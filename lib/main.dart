@@ -468,17 +468,22 @@ String formatDate(DateTime date) {
 }
 
 String remainingLabel(Task task) {
+  if (task.completed) {
+    return 'Completed';
+  }
+
   final diff = task.deadline.difference(DateTime.now());
 
-  if (diff.isNegative) {
+  if (diff.isNegative || diff.inSeconds <= 0) {
     return 'Overdue';
   }
 
-  if (diff.inHours < 24) {
-    return '${diff.inHours}h left';
-  }
+  final days = diff.inDays;
+  final hours = diff.inHours % 24;
+  final minutes = diff.inMinutes % 60;
+  final seconds = diff.inSeconds % 60;
 
-  return '${diff.inDays}d left';
+  return '${days}d ${hours}h ${minutes}m ${seconds}s';
 }
 
 Color priorityColor(
@@ -725,7 +730,7 @@ class DashboardPage extends StatelessWidget {
 // TASK CARD
 // ============================================================
 
-class TaskCard extends StatelessWidget {
+class TaskCard extends StatefulWidget {
   const TaskCard({
     super.key,
     required this.task,
@@ -738,7 +743,33 @@ class TaskCard extends StatelessWidget {
   final bool highlighted;
 
   @override
+  State<TaskCard> createState() => _TaskCardState();
+}
+
+class _TaskCardState extends State<TaskCard> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final task = widget.task;
+    final store = widget.store;
+    final highlighted = widget.highlighted;
     final score = task.priorityScore(DateTime.now());
 
     final color = priorityColor(context, score);
@@ -994,8 +1025,23 @@ class _TasksPageState extends State<TasksPage> {
 
                 return Dismissible(
                   key: ValueKey(task.id),
-                  direction: DismissDirection.endToStart,
+                  direction: DismissDirection.horizontal,
                   background: Container(
+                    alignment: Alignment.centerLeft,
+                    padding: const EdgeInsets.only(
+                      left: 24,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: .15),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: Icon(
+                      Icons.check_circle,
+                      color: Colors.green.shade700,
+                      size: 30,
+                    ),
+                  ),
+                  secondaryBackground: Container(
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(
                       right: 24,
@@ -1009,7 +1055,16 @@ class _TasksPageState extends State<TasksPage> {
                       color: Theme.of(context).colorScheme.onErrorContainer,
                     ),
                   ),
-                  confirmDismiss: (_) async {
+                  confirmDismiss: (direction) async {
+                    if (direction == DismissDirection.startToEnd) {
+                      if (!task.completed) {
+                        task.progress = 100;
+                        task.completed = true;
+                        await widget.store.update(task);
+                      }
+                      return true;
+                    }
+
                     return await showDialog<bool>(
                           context: context,
                           builder: (ctx) {
@@ -1049,7 +1104,10 @@ class _TasksPageState extends State<TasksPage> {
                         ) ??
                         false;
                   },
-                  onDismissed: (_) {
+                  onDismissed: (direction) {
+                    if (direction == DismissDirection.startToEnd) {
+                      return;
+                    }
                     widget.store.remove(task.id);
                   },
                   child: TaskCard(
